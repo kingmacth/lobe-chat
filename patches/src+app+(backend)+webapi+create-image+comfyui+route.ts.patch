@@ -1,0 +1,11 @@
+diff --git a/src/app/(backend)/webapi/create-image/comfyui/route.ts b/src/app/(backend)/webapi/create-image/comfyui/route.ts
+index 1111111..2222222 100644
+--- a/src/app/(backend)/webapi/create-image/comfyui/route.ts
++++ b/src/app/(backend)/webapi/create-image/comfyui/route.ts
+@@ -1,5 +1,5 @@
+ // ...
+ 
+-export const maxDuration = 300;
++export const maxDuration = 60;
+ 
+ // ...
