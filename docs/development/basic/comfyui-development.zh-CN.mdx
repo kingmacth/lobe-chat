@@ -187,7 +187,7 @@ ComfyUI 提供了用于图像生成的 REST WebAPI 路由，支持常规认证�
 ```typescript
 // src/app/(backend)/webapi/create-image/comfyui/route.ts
 export const runtime = 'nodejs';
-export const maxDuration = 300;  // 最长5分钟
+export const maxDuration = 60
 
 // POST /api/create-image/comfyui
 {
