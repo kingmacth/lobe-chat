@@ -1,11 +1,12 @@
-import type { UserMemoryData, UserMemoryIdentityItem } from '@lobechat/context-engine';
-import type { RetrieveMemoryResult } from '@lobechat/types';
+import { type UserMemoryData, type UserMemoryIdentityItem } from '@lobechat/context-engine';
+import { type RetrieveMemoryResult } from '@lobechat/types';
 
 import { getChatStoreState } from '@/store/chat';
 import { getUserMemoryStoreState } from '@/store/userMemory';
 import { agentMemorySelectors, identitySelectors } from '@/store/userMemory/selectors';
 
 const EMPTY_MEMORIES: RetrieveMemoryResult = {
+  activities: [],
   contexts: [],
   experiences: [],
   preferences: [],
@@ -69,6 +70,7 @@ export const combineUserMemoryData = (
   topicMemories: RetrieveMemoryResult,
   identities: UserMemoryIdentityItem[],
 ): UserMemoryData => ({
+  activities: topicMemories.activities,
   contexts: topicMemories.contexts,
   experiences: topicMemories.experiences,
   identities,

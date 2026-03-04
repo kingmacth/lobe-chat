@@ -1,9 +1,9 @@
 import { DEFAULT_PROVIDER } from '@lobechat/business-const';
 import { DEFAULT_MODEL, DEFAUTT_AGENT_TTS_CONFIG } from '@lobechat/const';
-import type { AgentBuilderContext } from '@lobechat/context-engine';
+import { type AgentBuilderContext } from '@lobechat/context-engine';
 import { type AgentMode, type LobeAgentTTSConfig, type LocalSystemConfig } from '@lobechat/types';
 
-import type { AgentStoreState } from '../initialState';
+import { type AgentStoreState } from '../initialState';
 import { agentSelectors } from './selectors';
 
 /**
@@ -115,8 +115,15 @@ const getAgentBuilderContextById =
     };
   };
 
+/**
+ * Get full agent data by agentId
+ * Returns the complete agent object including metadata fields like updatedAt
+ */
+const getAgentById = (agentId: string) => (s: AgentStoreState) => s.agentMap[agentId];
+
 export const agentByIdSelectors = {
   getAgentBuilderContextById,
+  getAgentById,
   getAgentConfigById: agentSelectors.getAgentConfigById,
   getAgentEnableModeById,
   getAgentFilesById,

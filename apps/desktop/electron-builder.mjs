@@ -1,10 +1,16 @@
-import dotenv from 'dotenv';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { getAsarUnpackPatterns, getFilesPatterns } from './native-deps.config.mjs';
+import dotenv from 'dotenv';
+
+import {
+  copyNativeModules,
+  copyNativeModulesToSource,
+  getAsarUnpackPatterns,
+  getNativeModulesFilesConfig,
+} from './native-deps.config.mjs';
 
 dotenv.config();
 
@@ -22,9 +28,11 @@ const updateServerUrl = process.env.UPDATE_SERVER_URL;
 console.log(`🚄 Build Version ${packageJSON.version}, Channel: ${channel}`);
 console.log(`🏗️ Building for architecture: ${arch}`);
 
+// Channel identity derived solely from UPDATE_CHANNEL env var.
+// Adding a new channel won't break stable detection.
+const isStable = !channel || channel === 'stable';
 const isNightly = channel === 'nightly';
-const isBeta = packageJSON.name.includes('beta');
-const isStable = !isNightly && !isBeta;
+const isBeta = channel === 'beta';
 
 // 根据 channel 配置不同的 publish provider
 // - Stable + UPDATE_SERVER_URL: 使用 generic (自定义 HTTP 服务器)
@@ -75,9 +83,10 @@ const protocolScheme = getProtocolScheme();
 
 // Determine icon file based on version type
 const getIconFileName = () => {
-  if (isNightly) return 'Icon-nightly';
+  if (isStable) return 'Icon';
   if (isBeta) return 'Icon-beta';
-  return 'Icon';
+  // nightly, canary, and any future pre-release channels share nightly icon
+  return 'Icon-nightly';
 };
 
 /**
@@ -86,30 +95,53 @@ const getIconFileName = () => {
  */
 const config = {
   /**
-   * AfterPack hook to copy pre-generated Liquid Glass Assets.car for macOS 26+
+   * BeforePack hook to resolve pnpm symlinks for native modules.
+   * This ensures native modules are properly included in the asar archive.
+   */
+  beforePack: async () => {
+    await copyNativeModulesToSource();
+  },
+  /**
+   * AfterPack hook for post-processing:
+   * 1. Copy native modules to asar.unpacked (resolving pnpm symlinks)
+   * 2. Copy Liquid Glass Assets.car for macOS 26+
+   * 3. Remove unused Electron Framework localizations
+   *
    * @see https://github.com/electron-userland/electron-builder/issues/9254
    * @see https://github.com/MultiboxLabs/flow-browser/pull/159
    * @see https://github.com/electron/packager/pull/1806
    */
   afterPack: async (context) => {
-    // Only process macOS builds
-    if (!['darwin', 'mas'].includes(context.electronPlatformName)) {
+    const isMac = ['darwin', 'mas'].includes(context.electronPlatformName);
+
+    // Determine resources path based on platform
+    let resourcesPath;
+    if (isMac) {
+      resourcesPath = path.join(
+        context.appOutDir,
+        `${context.packager.appInfo.productFilename}.app`,
+        'Contents',
+        'Resources',
+      );
+    } else {
+      // Windows and Linux: resources is directly in appOutDir
+      resourcesPath = path.join(context.appOutDir, 'resources');
+    }
+
+    // Copy native modules to asar.unpacked, resolving pnpm symlinks
+    const unpackedNodeModules = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules');
+    await copyNativeModules(unpackedNodeModules);
+
+    // macOS-specific post-processing
+    if (!isMac) {
       return;
     }
 
     const iconFileName = getIconFileName();
     const assetsCarSource = path.join(__dirname, 'build', `${iconFileName}.Assets.car`);
-    const resourcesPath = path.join(
-      context.appOutDir,
-      `${context.packager.appInfo.productFilename}.app`,
-      'Contents',
-      'Resources',
-    );
     const assetsCarDest = path.join(resourcesPath, 'Assets.car');
 
     // Remove unused Electron Framework localizations to reduce app size
-    // Equivalent to:
-    // ../../Frameworks/Electron Framework.framework/Versions/A/Resources/*.lproj
     const frameworkResourcePath = path.join(
       context.appOutDir,
       `${context.packager.appInfo.productFilename}.app`,
@@ -155,7 +187,7 @@ const config = {
   appImage: {
     artifactName: '${productName}-${version}.${ext}',
   },
-  asar: true,
+
   // Native modules must be unpacked from asar to work correctly
   asarUnpack: getAsarUnpackPatterns(),
 
@@ -168,6 +200,16 @@ const config = {
 
   dmg: {
     artifactName: '${productName}-${version}-${arch}.${ext}',
+    background: 'resources/dmg.png',
+    contents: [
+      { type: 'file', x: 150, y: 240 },
+      { type: 'link', path: '/Applications', x: 450, y: 240 },
+    ],
+    iconSize: 80,
+    window: {
+      height: 400,
+      width: 600,
+    },
   },
 
   electronDownload: {
@@ -177,17 +219,13 @@ const config = {
   files: [
     'dist',
     'resources',
-    // Ensure Next export assets are packaged
-    'dist/next/**/*',
+    'dist/renderer/**/*',
     '!resources/locales',
-    '!dist/next/docs',
-    '!dist/next/packages',
-    '!dist/next/.next/server/app/sitemap',
-    '!dist/next/.next/static/media',
-    // Exclude node_modules from packaging (except native modules)
+    '!resources/dmg.png',
+    // Exclude all node_modules first
     '!node_modules',
-    // Include native modules (defined in native-deps.config.mjs)
-    ...getFilesPatterns(),
+    // Then explicitly include native modules using object form (handles pnpm symlinks)
+    ...getNativeModulesFilesConfig(),
   ],
   generateUpdatesFilesForAllChannels: true,
   linux: {
@@ -221,15 +259,10 @@ const config = {
     hardenedRuntime: hasAppleCertificate,
     notarize: hasAppleCertificate,
     ...(hasAppleCertificate ? {} : { identity: null }),
-    target:
-      // 降低构建时间，nightly 只打 dmg
-      // 根据当前机器架构只构建对应架构的包
-      isNightly
-        ? [{ arch: [arch === 'arm64' ? 'arm64' : 'x64'], target: 'dmg' }]
-        : [
-            { arch: [arch === 'arm64' ? 'arm64' : 'x64'], target: 'dmg' },
-            { arch: [arch === 'arm64' ? 'arm64' : 'x64'], target: 'zip' },
-          ],
+    target: [
+      { arch: [arch === 'arm64' ? 'arm64' : 'x64'], target: 'dmg' },
+      { arch: [arch === 'arm64' ? 'arm64' : 'x64'], target: 'zip' },
+    ],
   },
   npmRebuild: true,
   nsis: {
